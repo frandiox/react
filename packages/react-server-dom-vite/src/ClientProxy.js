@@ -22,9 +22,9 @@ type ClientProxy = {
 // them later when consuming the response in SSR.
 globalThis.__COMPONENT_INDEX = {};
 
-// Store to get module references for long strings
-// when rendering in RSC (strings cannot be wrapped Proxy).
-globalThis.__STRING_REFERENCE_INDEX = {};
+// Store to get module references for every export
+// when rendering in RSC.
+globalThis.__MODULE_REFERENCE_MAP = new Map();
 
 export const MODULE_TAG = Symbol.for('react.module.reference');
 export const STRING_SIZE_LIMIT = 64;
@@ -63,34 +63,17 @@ function createModuleReference(id, value, name, isDefault) {
 export function wrapInClientProxy({id, name, isDefault, value}: ClientProxy) {
   const type = typeof value;
 
-  if (value === null || (type !== 'object' && type !== 'function')) {
-    if (type === 'string' && value.length >= STRING_SIZE_LIMIT) {
-      const moduleRef = createModuleReference(id, value, name, isDefault);
-      globalThis.__STRING_REFERENCE_INDEX[value] = moduleRef;
-    }
-
+  if (
+    value === null ||
+    (type !== 'object' &&
+      type !== 'function' &&
+      (type !== 'string' || value.length < STRING_SIZE_LIMIT))
+  ) {
     return value;
   }
 
   const moduleRef = createModuleReference(id, value, name, isDefault);
-  const get = (target, prop, receiver) =>
-    Reflect.get(isRsc() ? moduleRef : target, prop, receiver);
+  globalThis.__MODULE_REFERENCE_MAP.set(value, moduleRef);
 
-  return new Proxy(
-    value,
-    type === 'object'
-      ? {get}
-      : {
-          get,
-          apply() {
-            if (isRsc()) throw new Error(FN_RSC_ERROR + ` Calling "${name}".`);
-            return Reflect.apply(...arguments);
-          },
-          construct() {
-            if (isRsc())
-              throw new Error(FN_RSC_ERROR + ` Instantiating "${name}".`);
-            return Reflect.construct(...arguments);
-          },
-        },
-  );
+  return value;
 }
